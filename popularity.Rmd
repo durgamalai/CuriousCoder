@@ -1,0 +1,529 @@
+# Song Popularity Prediction using spotify dataset
+## By Durga, Radika, Rohit
+setwd("D:/College/FallSemester/Advanced Analytics/Project/Spotify-Song-Popularity-Prediction-master/data")
+```{r}
+
+library(tidyverse)
+library(dplyr)
+library(caret)
+
+
+```
+### Loading Spotify Data
+```{r}
+spotify = read.csv("D:/College/FallSemester/Advanced Analytics/Project/Spotify-Song-Popularity-Prediction-master/data/SpotifyFeatures.csv")
+head(spotify)
+str(spotify)
+names(spotify)
+```
+
+
+###ensuring children's music difference is resolved
+```{r}
+spotify[spotify == "Children's Music"] <-'Children’s Music'
+```
+
+#Checking for missing values
+```{r}
+sapply(spotify,function(x) sum(is.na(x)))
+
+```
+# finding duplicate records
+```{r}
+sum(duplicated(spotify$track_id))
+
+```
+
+```{r}
+duplicate=spotify[duplicated(spotify$track_id), ]
+dim(duplicate)
+head(duplicate)
+```
+
+```{r}
+spotify[spotify["track_id"]=="6iOvnACn4ChlAw4lWUU4dd"]
+spotify[spotify["track_id"]=="2XGLdVl7lGeq8ksM6Al7jT"]
+```
+#We see that most of the attributes of the duplicated songs are the same except for 'popularity' and 'genre'.The 'popularity' column can be aggregated since it is a numerical column but dummy variables should be created for the categorical column of 'genre'.
+
+#generating dummy values for 'genre'
+
+```{r}
+genre_list = as.list(unique(spotify$genre))
+for (g in genre_list){
+  spotify[g]=as.numeric((spotify$genre==g))
+}
+
+```
+
+```{r}
+head(spotify)
+
+```
+#Aggregation of popularity score
+#grouping by track_id number to get rid of duplicates and keeping the maximum values in each column.
+
+```{r}
+spotify1 = aggregate(.~ track_id,data=spotify,FUN=max)
+
+```
+
+```{r}
+head(spotify1)
+
+```
+#Removing redundant genre column
+
+
+```{r}
+spotify2=subset(spotify1,select=-c(genre))
+dim(spotify2)
+```
+#We successfully addressed the duplicates of each track by aggregating them to a single row.
+#We now have 176,774 unique tracks in our dataset (down from 232,725).
+
+# TOP 50 2019
+
+```{r}
+setwd("D:/College/FallSemester/Advanced Analytics/Project/Spotify-Song-Popularity-Prediction-master/data")
+top50 <- read.csv("top50.csv", stringsAsFactors = T)
+
+
+```
+
+```{r}
+summary(top50$Popularity)
+
+```
+
+```{r}
+hist(top50$Popularity)
+```
+
+# TOP 100 2019
+
+```{r}
+setwd("D:/College/FallSemester/Advanced Analytics/Project/Spotify-Song-Popularity-Prediction-master/data")
+
+top100 <- read.csv("spotify_top_100_2019.csv", stringsAsFactors = T)
+
+```
+
+# summary and histogram plot of popularity
+
+```{r}
+summary(top100$popularity)
+
+```
+
+```{r}
+hist(top100$popularity)
+
+```
+#the scores within the range 0-25 seem like outliers. We can remove outliers from this dataset with the IQR method to get a better perspective on the data.
+
+```{r}
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(top100$popularity, .25)
+Q3 <- quantile(top100$popularity, .75)
+IQR<-IQR(top100$popularity)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+Top100_no_outliers <- subset(top100, top100$popularity> (Q1 - 1.5*IQR) & top100$popularity< (Q3 + 1.5*IQR))
+
+minimum=min(Top100_no_outliers$popularity)
+maximum=max(Top100_no_outliers$popularity)
+
+print(minimum)
+print(maximum)
+
+```
+```{r}
+hist(Top100_no_outliers$popularity)
+
+```
+#We will be defining a song being popular as being Top 100 worthy and therefore will establish our cutoff point at 58 based on the histogram above
+
+```{r}
+spotify2$is_popular = ifelse(spotify2$popularity >= 58, 1, 0)
+```
+
+```{r}
+head(spotify2)
+```
+#We are dropping 'popularity'as its converted into 'is_popular'. We are also dropping 'artist_name' and 'track_name' since we are looking at the anatomy of a popular song and not who sings it or what it's called.
+#The goal is to identify songs that will become popular without being affected by the artist's name since we would also like to find songs from up-and-coming artists.
+
+```{r}
+spotify3 <- subset(spotify2, select = -c(popularity, artist_name, track_name))
+```
+
+```{r}
+head(spotify3)
+```
+
+```{r}
+dim(spotify3)
+```
+#One Hot Encoding 
+```{r}
+#read df_ohe_test dataset
+spotifydf = read.csv("D:/College/FallSemester/Advanced Analytics/Project/Spotify-Song-Popularity-Prediction-master/data/df_ohe.csv",stringsAsFactors = TRUE)
+spotifydf <- spotifydf[ -c(1) ]
+spotifydf$is_popular = as.factor(spotifydf$is_popular)
+#spotifydf$is_popular = as.factor(spotifydf$is_popular)
+dim(spotifydf)
+head(spotifydf)
+
+```
+#splitting the data into training set and test set
+```{r}
+library(dplyr)
+#remove non numerical column
+spotifydf <- subset(spotifydf, select = -c(track_id))
+#split dataset
+print ("Spotify Training Dataset")
+s_train  <- spotifydf %>% dplyr::sample_frac(0.7)
+#write.csv(strain, "D:\\College\\FallSemester\\Advanced Analytics\\Project\\Spotify-Song-Popularity-Prediction-master\\data\\strain.csv", row.names=FALSE)
+print ("Spotify Testing Dataset")
+s_test   <- dplyr::anti_join(spotifydf,s_train)
+#write.csv(stest, "D:\\College\\FallSemester\\Advanced Analytics\\Project\\Spotify-Song-Popularity-Prediction-master\\data\\stest.csv", row.names=FALSE)
+```
+
+
+```{r}
+dim(s_train)
+dim(s_test)
+```
+
+#MODELS
+#MODEL 1: Logistic Regression
+```{r}
+# Logistic Regression Model
+spotify_log <- glm(is_popular ~., data =s_train, family =binomial)
+summary(spotify_log)
+```
+
+```{r}
+spotify_pred_test <- predict(spotify_log,s_test,type="response")
+```
+```{r}
+#choose the best threshold using ROC
+library(ROCR)
+ROCR_pred_test <- prediction(spotify_pred_test,s_test$is_popular)
+ROCR_perf_test <- performance(ROCR_pred_test,'tpr','fpr')
+plot(ROCR_perf_test,colorize=TRUE,print.cutoffs.at=seq(0.1,by=0.1))
+```
+```{r}
+#Confusion Matrix threshold > 0.1
+table(s_test$is_popular, as.numeric(spotify_pred_test>0.1)) 
+```
+
+```{r}
+#Confusion Matrix threshold > 0.2
+table(s_test$is_popular, as.numeric(spotify_pred_test>0.2)) 
+```
+
+```{r}
+varImp(spotify_log,sort=TRUE,n.var=10,main="Top 10 Important Variables")
+
+```
+
+
+```{r}
+#Confusion Matrix threshold > 0.3
+table(s_test$is_popular, as.numeric(spotify_pred_test>0.3)) 
+```
+
+```{r}
+library(randomForest)
+srf <- randomForest(is_popular~.,data=s_train)
+print(srf)
+```
+
+
+```{r}
+#Prediction on testing dataset
+library(caret)
+predict1<- predict(srf,s_test)
+confusionMatrix(predict1,s_test$is_popular)
+```
+```{r}
+#Importance of Variables
+varImpPlot(srf,sort=TRUE,n.var=10,main="Top 10 Important Variables")
+```
+
+## XGBOOST
+
+### Convert the train and test data into xgboost matrix type.
+
+```{r}
+library(xgboost)
+library(caret)  
+
+library(magrittr)
+library(dplyr)
+library(Matrix)
+```
+```{r}
+X_train = data.matrix(s_train[,-53])                  # independent variables for train
+y_train = s_train[,53]                                # dependent variables for train
+  
+X_test = data.matrix(s_test[,-53])                    # independent variables for test
+y_test = s_test[,53]                                   # dependent variables for test
+
+# convert the train and test data into xgboost matrix type.
+xgboost_train = xgb.DMatrix(data=as.matrix(X_train), label=y_train)
+xgboost_test = xgb.DMatrix(data=as.matrix(X_test), label=y_test)
+```
+
+```{r}
+head(s_train)
+```
+```{r}
+str(xgboost_train)
+```
+#Parameters
+```{r}
+nc <- length(unique(y_train))
+
+xgb_params <- list ("objective" = "multi:softprob",
+                    "eval_mertic" = "mlogloss",
+                    "num_class" = nc)
+```
+
+# eXtreme Gradient Boosting Model
+
+```{r}
+bst_model <- xgb.train(params = xgb_params,
+                       data = xgboost_train,
+                       nrounds = 1000,
+                       eta = 0.5,
+                       max.depth = 3,
+                       gamma = 0,
+                       subsample = 1,
+                       colsample_bytree = 1,
+                       missing = NA,
+                       seed = 333)
+```
+# Training & test error plot
+
+```{r}
+
+#bst_model$evaluation_log
+#plot(e$iter, e$train_mlogloss, col = 'blue')
+#lines(e$iter, e$test_mlogloss, col = 'red')
+#bst_model
+```
+```{r}
+# Feature importance
+imp <- xgb.importance(colnames(xgboost_train), model = bst_model)
+xgb.plot.importance(imp)
+```
+```{r}
+# Prediction & confusion matrix - test data
+p <- predict(bst_model, newdata = xgboost_test)
+pred <- matrix(p, nrow = nc, ncol = length(p)/nc) %>%
+         t() %>%
+         data.frame() %>%
+         mutate(label = y_test, max_prob = max.col(., "last")-1)
+table(Prediction = pred$max_prob, Actual = pred$label)
+
+```
+## Accuracy
+```{r}
+46934/52853
+
+```
+
+```{r}
+plot(bst_model)
+```
+
+```{r}
+#Splitting the file to popular to unpopular dataframes
+popular_songs=subset(df_ohe_clean,is_popular=="1")
+unpopular_songs=subset(df_ohe_clean,is_popular=="0")
+
+
+```
+
+```{r}
+head(popular_songs)
+head(unpopular_songs)
+write.csv(popular_songs, "D:\\College\\FallSemester\\Advanced Analytics\\Project\\Spotify-Song-Popularity-Prediction-master\\data\\popular.csv", row.names=FALSE)
+write.csv(unpopular_songs, "D:\\College\\FallSemester\\Advanced Analytics\\Project\\Spotify-Song-Popularity-Prediction-master\\data\\unpopular.csv", row.names=FALSE)
+```
+
+```{r}
+#checking for genre occurence counts for popular songs
+s=subset(popular_songs,select = c(11:36))
+genrecount<-colSums(s==1)
+p=tail(sort(genrecount),5)
+barplot(p,main="Top 5 Most Frequent Genres among popular songs",col="blue")
+
+
+```
+```{r}
+#checking for genre occurrence counts for unpopular songs
+s1=subset(unpopular_songs,select = c(11:36))
+genrecount1<-colSums(s1==1)
+p1=tail(sort(genrecount1),5)
+barplot(p1,main="Top 5 Most Frequent Genres among unpopular songs",col="blue")
+
+```
+
+```{r}
+#Acousticness score 
+m1<-mean(popular_songs$acousticness)
+m2 <- mean(unpopular_songs$acousticness)
+m=c(m1,m2)
+m
+```
+```{r}
+#Duration score 
+m1<-mean(popular_songs$duration_ms)
+m2 <- mean(unpopular_songs$duration_ms)
+m=c(m1,m2)
+m
+```
+```{r}
+#Speechiness score 
+m1<-mean(popular_songs$speechiness)
+m2 <- mean(unpopular_songs$speechiness)
+m=c(m1,m2)
+m
+```
+```{r}
+#Valence score 
+m1<-mean(popular_songs$valence)
+m2 <- mean(unpopular_songs$valence)
+m=c(m1,m2)
+m
+```
+```{r}
+#IQR of energy of popular track
+
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(popular_songs$energy, .25)
+Q3 <- quantile(popular_songs$energy, .75)
+IQR<-IQR(popular_songs$energy)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+popular_no_outliers <- subset(popular_songs, popular_songs$energy> (Q1 - 1.5*IQR) & popular_songs$energy< (Q3 + 1.5*IQR))
+m1=mean(popular_no_outliers$energy)
+#view row and column count of new data frame
+dim(popular_songs)
+dim(popular_no_outliers) 
+```
+
+```{r}
+#IQR of energy of unpopular track
+
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(unpopular_songs$energy, .25)
+Q3 <- quantile(unpopular_songs$energy, .75)
+IQR<-IQR(unpopular_songs$energy)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+unpopular_no_outliers <- subset(unpopular_songs, unpopular_songs$energy> (Q1 - 1.5*IQR) & unpopular_songs$energy< (Q3 + 1.5*IQR))
+m2=mean(unpopular_no_outliers$energy)
+m2
+m=c(m1,m2)
+m
+#view row and column count of new data frame
+dim(unpopular_songs)
+dim(unpopular_no_outliers) 
+library(RColorBrewer)
+coul <- brewer.pal(5, "Set2")
+bp=barplot(m,main="Mean Energy Scores for popular and unpopular tracks",col=coul,xlab="Mean Energy Score",ylab="Popularity",horiz=TRUE)
+text(bp,pos=3,m)
+
+```
+
+```{r}
+#IQR of danceability of popular track
+
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(popular_songs$danceability, .25)
+Q3 <- quantile(popular_songs$danceability, .75)
+IQR<-IQR(popular_songs$danceability)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+popular_no_outliers <- subset(popular_songs, popular_songs$danceability> (Q1 - 1.5*IQR) & popular_songs$danceability< (Q3 + 1.5*IQR))
+m1=mean(popular_no_outliers$danceability)
+m1
+#view row and column count of new data frame
+dim(popular_songs)
+dim(popular_no_outliers) 
+
+```
+
+
+
+```{r}
+#IQR of danceability of unpopular track
+
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(unpopular_songs$danceability, .25)
+Q3 <- quantile(unpopular_songs$danceability, .75)
+IQR<-IQR(unpopular_songs$danceability)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+unpopular_no_outliers <- subset(unpopular_songs, unpopular_songs$danceability> (Q1 - 1.5*IQR) & unpopular_songs$danceability< (Q3 + 1.5*IQR))
+m2=mean(unpopular_no_outliers$danceability)
+#view row and column count of new data frame
+dim(unpopular_songs)
+dim(unpopular_no_outliers) 
+m=c(m1,m2)
+m
+library(RColorBrewer)
+coul <- brewer.pal(5, "Set2")
+bp=barplot(m,main="Mean Danceability Scores for popular and unpopular tracks",col=coul,xlab="Mean Danceability Score",ylab="Popularity",horiz=TRUE)
+text(bp,pos=3,m)
+
+```
+
+```{r}
+#IQR of acousticness of popular track
+
+#find Q1, Q3, and interquartile range 
+Q1 <- quantile(popular_songs$acousticness, .25)
+Q3 <- quantile(popular_songs$acousticness, .75)
+IQR<-IQR(popular_songs$acousticness)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+popular_no_outliers <- subset(popular_songs, popular_songs$acousticness> (Q1 - 1.5*IQR) & popular_songs$acousticness< (Q3 + 1.5*IQR))
+m1=mean(popular_no_outliers$acousticness)
+m1
+#view row and column count of new data frame
+dim(popular_songs)
+dim(popular_no_outliers) 
+
+```
+
+
+
+```{r}
+#IQR of danceability of unpopular track
+
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(unpopular_songs$acousticness, .25)
+Q3 <- quantile(unpopular_songs$acousticness, .75)
+IQR<-IQR(unpopular_songs$acousticness)
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+unpopular_no_outliers <- subset(unpopular_songs, unpopular_songs$acousticness> (Q1 - 1.5*IQR) & unpopular_songs$acousticness< (Q3 + 1.5*IQR))
+m2=mean(unpopular_no_outliers$acousticness)
+#view row and column count of new data frame
+dim(unpopular_songs)
+dim(unpopular_no_outliers) 
+m=c(m1,m2)
+m
+library(RColorBrewer)
+coul <- brewer.pal(5, "Set2")
+bp=barplot(m,main="Mean Acousticness Scores for popular and unpopular tracks",col=coul,xlab="Mean Acousticness Score",ylab="Popularity",horiz=TRUE)
+text(bp,pos=3,m)
+
+```
+
